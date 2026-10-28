@@ -250,9 +250,13 @@ function mondayOf(d){ // Monday 00:00 LA, approximated as noon UTC of that LA da
 const todayKey=()=>ymd(new Date());
 function stat(entry,names){for(const n of names){const s=entry.stats.find(x=>x.name===n);if(s)return s.displayValue??s.value;}return '';}
 
+const HOSTS=['https://site.api.espn.com/apis','https://site.web.api.espn.com/apis'];
+S.lastErr='';
 async function fetchLimited(fns,n){
   const out=new Array(fns.length);let i=0;
-  async function worker(){while(i<fns.length){const k=i++;let d=null;for(let a=0;a<3&&!d;a++){try{d=await fns[k]();}catch(e){await new Promise(r=>setTimeout(r,500*(a+1)));}}out[k]=d;}}
+  async function worker(){while(i<fns.length){const k=i++;let d=null;
+    for(let a=0;a<4&&!d;a++){const host=HOSTS[a%HOSTS.length];try{d=await fns[k](host);}catch(e){S.lastErr=e.message;await new Promise(r=>setTimeout(r,400*(a+1)));}}
+    out[k]=d;}}
   await Promise.all([...Array(Math.min(n,fns.length))].map(worker));return out;
 }
 function gcalUrl(e,title,durH,desc,loc){
@@ -309,7 +313,7 @@ async function loadFixtures(){
   try{
     // one call per UTC day; UK/EU kickoffs mostly land on the same LA date, Monday extra covers spillover
     const fetchDays=[addDays(days[0],-1),...days,addDays(days[6],1)];
-    const res=await fetchLimited(fetchDays.map(d=>()=>getJSON(`${API}/site/v2/sports/soccer/${S.lg.id}/scoreboard?dates=${ymdc(d)}`)),3);
+    const res=await fetchLimited(fetchDays.map(d=>host=>getJSON(`${host}/site/v2/sports/soccer/${S.lg.id}/scoreboard?dates=${ymdc(d)}`)),3);
     S.failedDays=res.filter(r=>!r).length;
     const seen=new Set();
     S.events=res.flatMap(d=>(d&&d.events)||[]).filter(e=>{if(seen.has(e.id))return false;seen.add(e.id);return true;})
@@ -358,7 +362,7 @@ function renderFixtures(){
         <span class="tv">${esc(e.tv.join(', '))}</span></button>`;}).join('');}).join('');
     el.innerHTML=`<div class="list">${parts||`<div class="empty">No ${esc(S.lg.name)} games this week.</div>`}</div>`;
   }
-  if(S.failedDays)el.insertAdjacentHTML('afterbegin',`<div class="warn">${S.failedDays} day${S.failedDays>1?'s':''} didn't load from ESPN. <button id="retry">Retry</button></div>`);
+  if(S.failedDays)el.insertAdjacentHTML('afterbegin',`<div class="warn">${S.failedDays} day${S.failedDays>1?'s':''} didn't load from ESPN${S.lastErr?' ('+esc(S.lastErr)+')':''}. <button id="retry">Retry</button></div>`);
   const rb=$('#retry');if(rb)rb.onclick=()=>{Object.keys(cache).forEach(k=>{if(k.includes('scoreboard'))delete cache[k];});loadFixtures();};
   el.querySelectorAll('[data-ev]').forEach(b=>b.onclick=()=>openGame(b.dataset.ev));
 }
