@@ -7,6 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
+.mdnav{display:flex;gap:2px}.mdnav a{text-decoration:none;font-size:12.5px;padding:4px 9px;border-radius:5px;color:var(--muted)}.mdnav a:hover{background:var(--hover)}.mdnav a[aria-current]{color:var(--fg);font-weight:600}
+.star{color:var(--muted);font-size:13px;padding:0 4px;line-height:1;opacity:.45}.star:hover{opacity:1}.star.on{color:var(--amber);opacity:1}
+td.team button.star{display:inline;padding:0 4px}
+.filt{display:flex;gap:2px;border:1px solid var(--line);border-radius:6px;padding:2px;background:var(--panel)}.filt button{padding:4px 9px;border-radius:4px;font-size:12px;color:var(--muted)}.filt button[aria-pressed="true"]{background:var(--amber-soft);color:var(--amber);font-weight:600}
+.day.today{}
+
 /* Layout: table left, fixtures right; stacks on phone. Plain working tool. */
 :root{
   --bg:#f6f5f1;--panel:#ffffff;--fg:#17191c;--muted:#6b7075;--line:#e1dfd8;--line-2:#eeece6;
@@ -178,6 +184,7 @@ h4{margin:14px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercas
 <body>
 <header>
   <h1>Matchday <span>/ Soccer</span></h1>
+  <div id="nav"></div>
   <div class="tabs" role="tablist" id="leagues"></div>
   <div class="spacer"></div>
   <div class="stamp" id="stamp"></div>
@@ -198,6 +205,7 @@ h4{margin:14px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercas
         <button id="next" aria-label="Next week">›</button>
         <span class="range" id="range"></span>
       </div>
+      <div class="filt"><button id="starred" aria-pressed="false">★ Starred</button></div>
       <div class="tabs vtoggle" role="tablist" id="views">
         <button role="tab" data-v="week" aria-selected="true">Week</button>
         <button role="tab" data-v="day" aria-selected="false">Day</button>
@@ -214,6 +222,7 @@ h4{margin:14px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercas
   </div>
 </div>
 
+<script src="../shared.js"></script>
 <script>
 const API='https://site.api.espn.com/apis';
 const TZ='America/Los_Angeles';
@@ -282,7 +291,7 @@ async function loadStandings(){
   try{
     const d=await getJSON(`${API}/v2/sports/soccer/${S.lg.id}/standings`);
     const groups=(d.children&&d.children.length?d.children:[d]).filter(g=>g.standings&&g.standings.entries);
-    S.standingsRows=[];
+    S.standingsRows=[];const LGID=S.lg.id;
     let html='';
     groups.forEach(g=>{
       const rows=g.standings.entries.slice().sort((a,b)=>(+stat(a,['rank'])||99)-(+stat(b,['rank'])||99));
@@ -293,7 +302,7 @@ async function loadStandings(){
         S.teamsById[t.id]=t;S.standingsRows.push(e);
         let z='';if(pos<=S.lg.top)z='z-top';else if(S.lg.mid&&pos<=S.lg.mid)z='z-mid';else if(S.lg.bot&&pos>rows.length-S.lg.bot)z='z-bot';
         const logo=(t.logos&&t.logos[0]&&t.logos[0].href)||'';
-        html+=`<tr class="${z}"><td class="pos">${pos}</td><td class="team"><button data-team="${t.id}">${logo?`<img class="logo" src="${logo}" alt="">`:''}<span>${esc(t.shortDisplayName||t.displayName)}</span></button></td><td>${stat(e,['gamesPlayed'])}</td><td>${stat(e,['wins'])}</td><td>${stat(e,['ties'])}</td><td>${stat(e,['losses'])}</td><td>${stat(e,['pointDifferential'])}</td><td class="pts">${stat(e,['points'])}</td></tr>`;
+        html+=`<tr class="${z}"><td class="pos">${pos}</td><td class="team"><button class="star ${MD.isStarred('soccer',LGID,t.id)?'on':''}" data-star="${t.id}" aria-label="Star">★</button><button data-team="${t.id}">${logo?`<img class="logo" src="${logo}" alt="">`:''}<span>${esc(t.shortDisplayName||t.displayName)}</span></button></td><td>${stat(e,['gamesPlayed'])}</td><td>${stat(e,['wins'])}</td><td>${stat(e,['ties'])}</td><td>${stat(e,['losses'])}</td><td>${stat(e,['pointDifferential'])}</td><td class="pts">${stat(e,['points'])}</td></tr>`;
       });
       html+='</tbody></table></div>';
     });
@@ -302,6 +311,7 @@ async function loadStandings(){
     el.className='';el.innerHTML=html;
     $('#st-sub').textContent=(d.season&&d.season.displayName)||(d.seasons&&d.seasons[0]&&d.seasons[0].displayName)||'';
     el.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>openTeam(b.dataset.team));
+    el.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{const t=S.teamsById[b.dataset.star];b.classList.toggle('on',MD.toggleStar('soccer',LGID,t));renderFixtures();});
   }catch(e){el.className='err';el.textContent='Table failed to load. '+e.message;}
 }
 
@@ -339,7 +349,7 @@ function renderFixtures(){
   const el=$('#fx-body');el.className='';
   const days=[...Array(7)].map((_,i)=>addDays(S.weekStart,i));
   const tk=todayKey();
-  const byDay={};days.forEach(d=>byDay[ymd(d)]=[]);S.events.forEach(e=>{const k=ymd(e.date);if(byDay[k])byDay[k].push(e);});
+  const byDay={};days.forEach(d=>byDay[ymd(d)]=[]);const lg=('soccer'==='soccer')?S.lg.id:'nba';S.events.forEach(e=>{e.sport='soccer';e.league=lg;if(S.starOnly&&!MD.eventStarred(e))return;const k=ymd(e.date);if(byDay[k])byDay[k].push(e);});
   const logo=t=>t.logo?`<img class="logo" src="${t.logo}" alt="">`:'';
   const useWeek=S.view==='week'&&window.innerWidth>860;
   if(useWeek){
@@ -360,7 +370,7 @@ function renderFixtures(){
         <span class="sc">${e.state==='pre'?'v':esc(e.home.score)+' – '+esc(e.away.score)}</span>
         <span class="side ${aw?'w':''}">${logo(e.away.team)}<span>${esc(e.away.team.shortDisplayName)}</span></span>
         <span class="tv">${esc(e.tv.join(', '))}</span></button>`;}).join('');}).join('');
-    el.innerHTML=`<div class="list">${parts||`<div class="empty">No ${esc(S.lg.name)} games this week.</div>`}</div>`;
+    el.innerHTML=`<div class="list">${parts||`<div class="empty">${S.starOnly?'No starred-team games this week.':'No '+esc(S.lg.name)+' games this week.'}</div>`}</div>`;
   }
   if(S.failedDays)el.insertAdjacentHTML('afterbegin',`<div class="warn">${S.failedDays} day${S.failedDays>1?'s':''} didn't load from ESPN${S.lastErr?' ('+esc(S.lastErr)+')':''}. <button id="retry">Retry</button></div>`);
   const rb=$('#retry');if(rb)rb.onclick=()=>{Object.keys(cache).forEach(k=>{if(k.includes('scoreboard'))delete cache[k];});loadFixtures();};
@@ -379,7 +389,7 @@ async function openGame(id){
   const e=S.events.find(x=>x.id===id);if(!e)return;
   const rec=c=>(c.records&&c.records[0]&&c.records[0].summary)||'';
   const form=c=>c.form?`<span class="frm">${c.form.split('').map(ch=>`<i class="${ch}">${ch}</i>`).join('')}</span>`:'';
-  const tm=c=>`<div class="tm"><img class="logo" src="${c.team.logo||''}" alt=""><button data-team="${c.team.id}">${esc(c.team.displayName)}</button><span class="rec">${esc(rec(c))}</span>${form(c)}</div>`;
+  const tm=c=>`<div class="tm"><img class="logo" src="${c.team.logo||''}" alt=""><button data-team="${c.team.id}">${esc(c.team.displayName)}</button><button class="star ${MD.isStarred('soccer',e.league,c.team.id)?'on':''}" data-star="${c.team.id}" aria-label="Star">★</button><span class="rec">${esc(rec(c))}</span>${form(c)}</div>`;
   const mid=e.state==='pre'?`<div class="mid">${fmtTime(e.date)}<small>${fmtDate(e.date,{weekday:'short',month:'short',day:'numeric'})}</small></div>`
     :`<div class="mid">${esc(e.home.score)} – ${esc(e.away.score)}<small class="${e.state==='in'?'live':''}">${e.state==='in'?esc(e.clock)+' live':'Full time'}</small></div>`;
   let odds='';
@@ -393,6 +403,7 @@ async function openGame(id){
   <span class="k">Competition</span><span>${esc(S.lg.name)}</span></div>${e.state==='pre'?`<a class="cal" target="_blank" rel="noopener" href="${gcalUrl(e,`${e.home.team.shortDisplayName} v ${e.away.team.shortDisplayName}`,2,`${S.lg.name}\nWatch: ${e.tv.length?e.tv.join(', '):'TBD'}${e.odds&&e.odds.details?`\nLine: ${e.odds.details}`:''}\n\n${location.href}`,v)}">＋ Add to Google Calendar</a>`:''}${odds}<div id="lineups"><div class="loading">Loading lineups…</div></div>`;
   openModal(`${e.home.team.shortDisplayName} v ${e.away.team.shortDisplayName}`,html);
   $('#m-body').querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>openTeam(b.dataset.team));
+  $('#m-body').querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{const t=S.teamsById[b.dataset.star]||e.home.team;b.classList.toggle('on',MD.toggleStar('soccer',e.league,t));renderFixtures();loadStandings();});
   try{
     const s=await getJSON(`${API}/site/v2/sports/soccer/${S.lg.id}/summary?event=${id}`);
     const rs=(s.rosters||[]).filter(r=>r.roster&&r.roster.length);
@@ -434,7 +445,7 @@ function jumpToGame(id,e){if(!e)return;closeModal();S.weekStart=mondayOf(e.date)
 /* ---------- boot ---------- */
 function loadAll(){loadStandings();loadFixtures();}
 S.weekStart=mondayOf(new Date());
-renderLeagueTabs();syncViewTabs();loadAll();
+$('#nav').innerHTML=MD.nav('soccer');renderLeagueTabs();syncViewTabs();S.starOnly=MD.pref('md-staronly')==='1';$('#starred').setAttribute('aria-pressed',S.starOnly);$('#starred').onclick=()=>{S.starOnly=!S.starOnly;MD.pref('md-staronly',S.starOnly?'1':'0');$('#starred').setAttribute('aria-pressed',S.starOnly);renderFixtures();};loadAll();
 setInterval(()=>{if(S.events.some(e=>e.state==='in'))loadFixtures();},60000);
 </script>
 </body>

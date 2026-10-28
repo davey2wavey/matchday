@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Matchday · Tonight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../shared.css">
+</head>
+<body>
+<header>
+  <h1>Matchday <span>/ Tonight</span></h1>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div class="stamp" id="stamp"></div>
+</header>
+
+<div class="bar">
+  <div class="filt" id="slots"></div>
+  <div class="filt"><button id="starred" class="amber" aria-pressed="false">★ Starred only</button></div>
+  <div class="spacer"></div>
+  <span class="note">Next 24 hours · Pacific</span>
+</div>
+
+<section id="fx"><div class="loading">Loading…</div></section>
+
+<div class="ov" id="ov" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="m-h"><h3 id="m-title"></h3><button class="x" id="m-x" aria-label="Close">×</button></div>
+    <div class="m-b" id="m-body"></div>
+  </div>
+</div>
+
+<script src="../shared.js"></script>
+<script>
+const {esc,ymd,fmtTime,fmtDate,addDays,todayKey,scoreLabel,SPORTS}=MD;
+const S={events:[],failed:0,slots:{soccer:true,nba:true,nfl:false},starOnly:MD.pref('md-tonight-star')==='1'};
+try{const sl=JSON.parse(MD.pref('md-slots')||'null');if(sl)S.slots=Object.assign(S.slots,sl);}catch(e){}
+const $=s=>document.querySelector(s);
+$('#nav').innerHTML=MD.nav('tonight');
+$('#starred').setAttribute('aria-pressed',S.starOnly);
+$('#starred').onclick=()=>{S.starOnly=!S.starOnly;MD.pref('md-tonight-star',S.starOnly?'1':'0');$('#starred').setAttribute('aria-pressed',S.starOnly);render();};
+function renderSlots(){
+  $('#slots').innerHTML=Object.keys(SPORTS).map(k=>`<button data-slot="${k}" aria-pressed="${!!S.slots[k]}">${SPORTS[k].name}</button>`).join('');
+  $('#slots').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.slots[b.dataset.slot]=!S.slots[b.dataset.slot];MD.pref('md-slots',JSON.stringify(S.slots));renderSlots();load();});
+}
+async function load(){
+  const el=$('#fx');el.innerHTML=`<div class="loading">Loading…</div>`;
+  const now=new Date();const fetchDays=[addDays(now,-1),now,addDays(now,1)];
+  const combos=[];Object.keys(SPORTS).forEach(sp=>{if(!S.slots[sp])return;SPORTS[sp].leagues.forEach(l=>combos.push({sport:sp,league:l.id}));});
+  const res=await Promise.all(combos.map(c=>MD.scoreboard(c.sport,c.league,fetchDays)));
+  S.failed=res.reduce((n,r)=>n+r.failed,0);
+  const lo=now.getTime()-3*36e5,hi=now.getTime()+24*36e5; // started up to 3h ago through next 24h
+  S.events=res.flatMap(r=>r.events).filter(e=>e.date>=lo&&e.date<=hi).sort((a,b)=>a.date-b.date);
+  $('#stamp').textContent='Updated '+fmtTime(new Date())+' PT';
+  render();
+}
+function render(){
+  const el=$('#fx');const tk=todayKey();
+  const logo=t=>t.logo?`<img class="logo" src="${t.logo}" alt="">`:'';
+  const list=S.starOnly?S.events.filter(MD.eventStarred):S.events;
+  const warn=S.failed?`<div class="warn">${S.failed} request${S.failed>1?'s':''} didn't load from ESPN${MD.lastErr()?' ('+esc(MD.lastErr())+')':''}. <button id="retry">Retry</button></div>`:'';
+  const groups={};list.forEach(e=>{const k=ymd(e.date);(groups[k]=groups[k]||[]).push(e);});
+  const row=e=>{const soccer=e.sport==='soccer';const L=soccer?e.home:e.away,R=soccer?e.away:e.home;
+    const lw=e.completed&&+L.score>+R.score,rw=e.completed&&+R.score>+L.score;
+    const starL=MD.stars().some(s=>s.sport===e.sport&&s.id==L.team.id),starR=MD.stars().some(s=>s.sport===e.sport&&s.id==R.team.id);
+    const lg=(SPORTS[e.sport].leagues.find(l=>l.id===e.league)||{}).name||SPORTS[e.sport].name;
+    return `<button class="tn" data-ev="${e.id}"><span class="tm ${e.state==='in'?'live':''}">${scoreLabel(e)}<small>${esc(lg)}</small></span>
+      <span class="side r ${lw?'w':''} ${starL?'star':''}"><span>${esc(L.team.shortDisplayName)}</span>${logo(L.team)}</span>
+      <span class="sc">${e.state==='pre'?(soccer?'v':'@'):esc(L.score)+' – '+esc(R.score)}</span>
+      <span class="side ${rw?'w':''} ${starR?'star':''}">${logo(R.team)}<span>${esc(R.team.shortDisplayName)}</span></span>
+      <span class="tv">${esc(e.tv.join(', '))}</span></button>`;};
+  const body=Object.keys(groups).sort().map(k=>{const d=groups[k][0].date;return `<div class="tn-h"><span>${k===tk?'Today':fmtDate(d,{weekday:'long'})}</span><span class="n">${fmtDate(d,{month:'short',day:'numeric'})}</span></div>`+groups[k].map(row).join('');}).join('');
+  el.innerHTML=warn+(body||`<div class="empty big">${S.starOnly?'No starred-team games in the next 24 hours.':'Nothing on in the next 24 hours.'}</div>`);
+  const rb=$('#retry');if(rb)rb.onclick=()=>{MD.clearScoreboardCache();load();};
+  el.querySelectorAll('[data-ev]').forEach(b=>b.onclick=()=>openGame(b.dataset.ev));
+}
+/* modal */
+function openModal(title,html){$('#m-title').textContent=title;$('#m-body').innerHTML=html;$('#ov').hidden=false;document.body.style.overflow='hidden';}
+function closeModal(){$('#ov').hidden=true;document.body.style.overflow='';}
+$('#m-x').onclick=closeModal;$('#ov').onclick=e=>{if(e.target.id==='ov')closeModal();};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+function openGame(id){
+  const e=S.events.find(x=>x.id===id);if(!e)return;
+  const soccer=e.sport==='soccer';const L=soccer?e.home:e.away,R=soccer?e.away:e.home;
+  const rec=c=>(c.records&&c.records[0]&&c.records[0].summary)||'';
+  const tm=c=>`<div class="tm"><img class="logo" src="${c.team.logo||''}" alt=""><b>${esc(c.team.displayName)}</b><span class="rec">${esc(rec(c))}</span></div>`;
+  const mid=e.state==='pre'?`<div class="mid">${fmtTime(e.date)}<small>${fmtDate(e.date,{weekday:'short',month:'short',day:'numeric'})}</small></div>`:`<div class="mid">${esc(L.score)} – ${esc(R.score)}<small class="${e.state==='in'?'live':''}">${esc(scoreLabel(e))}</small></div>`;
+  const v=e.venue?`${e.venue.fullName||''}${e.venue.address?`, ${e.venue.address.city||''}`:''}`:'—';
+  const title=soccer?`${L.team.shortDisplayName} v ${R.team.shortDisplayName}`:`${L.team.shortDisplayName} @ ${R.team.shortDisplayName}`;
+  const lgName=(SPORTS[e.sport].leagues.find(l=>l.id===e.league)||{}).name||SPORTS[e.sport].name;
+  const cal=e.state==='pre'?`<a class="cal" target="_blank" rel="noopener" href="${MD.gcalUrl(e,title,`${lgName}\nWatch: ${e.tv.length?e.tv.join(', '):'TBD'}\n\n${location.href}`,v)}">＋ Add to Google Calendar</a>`:'';
+  openModal(title,`<div class="score">${tm(L)}${mid}${tm(R)}</div><div class="kv"><span class="k">${soccer?'Kickoff':'Tip-off'}</span><span>${fmtDate(e.date,{weekday:'long',month:'long',day:'numeric'})} · ${fmtTime(e.date)} PT</span><span class="k">Venue</span><span>${esc(v)}</span><span class="k">TV</span><span>${e.tv.length?esc(e.tv.join(', ')):'—'}</span><span class="k">League</span><span>${esc(lgName)}</span></div>${cal}<p class="note">Full detail on the <a href="../${e.sport}/">${esc(SPORTS[e.sport].name)} board</a>.</p>`);
+}
+renderSlots();load();
+setInterval(()=>{if(S.events.some(e=>e.state==='in'))load();},60000);
+</script>
+</body>
+</html>
