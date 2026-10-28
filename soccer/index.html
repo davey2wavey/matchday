@@ -312,7 +312,7 @@ async function loadFixtures(){
     const res=await fetchLimited(fetchDays.map(d=>()=>getJSON(`${API}/site/v2/sports/soccer/${S.lg.id}/scoreboard?dates=${ymdc(d)}`)),3);
     S.failedDays=res.filter(r=>!r).length;
     const seen=new Set();
-    S.events=res.flatMap(d=>d.events||[]).filter(e=>{if(seen.has(e.id))return false;seen.add(e.id);return true;})
+    S.events=res.flatMap(d=>(d&&d.events)||[]).filter(e=>{if(seen.has(e.id))return false;seen.add(e.id);return true;})
       .map(normalize).filter(e=>{const k=ymd(e.date);return k>=ymd(days[0])&&k<=ymd(days[6]);})
       .sort((a,b)=>a.date-b.date);
     S.events.forEach(e=>{S.teamsById[e.home.team.id]=S.teamsById[e.home.team.id]||e.home.team;S.teamsById[e.away.team.id]=S.teamsById[e.away.team.id]||e.away.team;});
